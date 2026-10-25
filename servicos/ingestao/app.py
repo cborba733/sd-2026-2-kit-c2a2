@@ -1,20 +1,20 @@
 """
-Servico 1 - INGESTAO: recebe documentos, gera embeddings e armazena.
+Servico 1 - INGESTAO (API): recebe documentos e os coloca numa FILA.
 
-JA PRONTO: indexacao em memoria e a rota de status.
-TAREFA 1: persistir o indice em disco para nao perder ao reiniciar.
+TAREFA 1: o indice agora fica em arquivo (servicos/comum/indice_store.py).
+TAREFA 4: /indexar nao indexa na hora; enfileira o lote no Redis e responde 202.
+          Quem gera os embeddings e grava o indice e o worker (worker.py).
 
 Rodar: uvicorn servicos.ingestao.app:app --port 8001
 """
-from fastapi import FastAPI
+import redis
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from servicos.comum.embeddings import Vetorizador
+from servicos.comum import fila, indice_store
+from servicos.comum.log import logger
 
 app = FastAPI(title="Ingestao - C2.A2")
-
-vetorizador = Vetorizador()
-INDICE = []
 
 
 class Documento(BaseModel):
@@ -22,29 +22,32 @@ class Documento(BaseModel):
     origem: str = "desconhecida"
 
 
-@app.post("/indexar")
+@app.post("/indexar", status_code=202)
 def indexar(docs: list[Documento]):
-    textos = [d.texto for d in docs]
-    vetorizador.ajustar([d["texto"] for d in INDICE] + textos or textos)
-    INDICE.clear()
-    # reindexa tudo com o vocabulario novo
-    for d in docs:
-        INDICE.append({"texto": d.texto, "origem": d.origem})
-    for item in INDICE:
-        item["vetor"] = vetorizador.vetorizar(item["texto"])
-    return {"indexados": len(INDICE)}
+    """Enfileira o lote e responde na hora (processamento assincrono)."""
+    if not docs:
+        raise HTTPException(status_code=400, detail="nenhum documento enviado")
+    try:
+        fila.enfileirar([d.model_dump() for d in docs])
+    except redis.RedisError as erro:
+        logger.warning("ingestao: fila indisponivel: %s", erro)
+        raise HTTPException(status_code=503, detail="fila indisponivel")
+    logger.info("ingestao: lote enfileirado quantidade=%d", len(docs))
+    return {"enfileirados": len(docs)}
 
 
 @app.get("/indice")
 def indice():
     """Consumido pelo servico de recuperacao."""
-    return {"total": len(INDICE),
-            "itens": [{"texto": i["texto"], "origem": i["origem"],
-                       "vetor": i["vetor"]} for i in INDICE]}
+    itens = indice_store.carregar()
+    return {"total": len(itens), "itens": itens}
 
 
 @app.get("/saude")
 def saude():
-    return {"status": "ok", "documentos": len(INDICE)}
-
-# TAREFA 1: persistir o indice (arquivo ou banco vetorial).
+    try:
+        pendentes = fila.tamanho()
+    except redis.RedisError:
+        pendentes = None
+    return {"status": "ok", "documentos": len(indice_store.carregar()),
+            "na_fila": pendentes}

@@ -1,26 +1,27 @@
-"""
-Embeddings da disciplina - PRONTO, NAO PRECISA ALTERAR.
-
-Transforma texto em vetor de numeros. Usa TF-IDF (offline, sem download).
-Se quiser trocar por um modelo de embeddings de verdade (sentence-transformers),
-basta manter a mesma interface: ajustar(textos) e vetorizar(texto).
-
-Voce NAO precisa entender a matematica. Precisa saber:
-  - vetorizar(texto) devolve uma lista de numeros
-  - similaridade(a, b) devolve o quanto dois vetores se parecem (0 a 1)
-"""
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+
+# palavras muito comuns do portugues: sem isso, "de", "a", "que" fazem
+# perguntas sem relacao parecerem parecidas com os documentos
+STOPWORDS_PT = [
+    "a", "o", "as", "os", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das",
+    "em", "no", "na", "nos", "nas", "por", "para", "com", "sem", "sobre", "ao", "aos",
+    "e", "ou", "mas", "que", "se", "como", "qual", "quais", "quando", "onde", "quem",
+    "ser", "sao", "foi", "era", "ha", "isso", "isto", "esse", "essa", "este",
+    "esta", "seu", "sua", "seus", "suas", "mais", "muito", "ja", "tambem", "pelo", "pela",
+    "ele", "ela", "eles", "elas", "nao", "sim", "entre", "ate", "so", "apenas", "pode",
+    "podem", "uso", "faz", "fazer", "diz", "funciona",
+]
 
 
 class Vetorizador:
 
     def __init__(self):
-        self._tfidf = TfidfVectorizer(ngram_range=(1, 2), min_df=1)
+        self._tfidf = TfidfVectorizer(ngram_range=(1, 2), min_df=1,
+                                      stop_words=STOPWORDS_PT)
         self._ajustado = False
 
     def ajustar(self, textos):
-        """Aprende o vocabulario a partir dos documentos indexados."""
         self._tfidf.fit(textos)
         self._ajustado = True
 
@@ -31,7 +32,6 @@ class Vetorizador:
 
 
 def similaridade(a, b):
-    """Similaridade do cosseno entre dois vetores."""
     va, vb = np.array(a), np.array(b)
     na, nb = np.linalg.norm(va), np.linalg.norm(vb)
     if na == 0 or nb == 0:
